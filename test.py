@@ -6,6 +6,7 @@ import os
 
 
 img_path = "./input/sequences/10/image_0/"
+calib_path = "./input/sequences/10/calib.txt"
 pose_path = "./input//poses/10.txt"
 
 focal = 718.8560
@@ -20,7 +21,7 @@ lk_params = dict(winSize=(21, 21), criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRIT
 # Create some random colors
 color = np.random.randint(0, 255, (5000, 3))
 
-vo = MonoVideoOdometry(img_path, pose_path, focal, pp, lk_params)
+vo = MonoVideoOdometry(img_path, calib_path, pose_path, focal, pp, lk_params)
 traj = np.zeros(shape=(600, 800, 3))
 
 # mask = np.zeros_like(vo.current_frame)
