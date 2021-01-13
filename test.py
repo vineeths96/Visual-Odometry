@@ -1,12 +1,12 @@
 import numpy as np
 import cv2 as cv
-import matplotlib.pyplot as plt
-from monovideoodometery import MonoVideoOdometery
+# import matplotlib.pyplot as plt
+from monovideoodometry import MonoVideoOdometry
 import os
 
 
-img_path = "C:\\Users\\Ali\\Desktop\\Projects\\SLAM\\videos\\data_odometry_gray\\dataset\\sequences\\00\\image_0\\"
-pose_path = "C:\\Users\\Ali\\Desktop\\Projects\\SLAM\\videos\\data_odometry_poses\\dataset\\poses\\00.txt"
+img_path = "./input/sequences/10/image_0/"
+pose_path = "./input//poses/10.txt"
 
 focal = 718.8560
 pp = (607.1928, 185.2157)
@@ -20,7 +20,7 @@ lk_params = dict(winSize=(21, 21), criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRIT
 # Create some random colors
 color = np.random.randint(0, 255, (5000, 3))
 
-vo = MonoVideoOdometery(img_path, pose_path, focal, pp, lk_params)
+vo = MonoVideoOdometry(img_path, pose_path, focal, pp, lk_params)
 traj = np.zeros(shape=(600, 800, 3))
 
 # mask = np.zeros_like(vo.current_frame)
