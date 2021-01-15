@@ -101,14 +101,14 @@ class MonoVideoOdometry(object):
         )
 
         # Save the good points from the optical flow
-        self.good_old = self.p0[st == 1]
-        self.good_new = self.p1[st == 1]
+        self.previous_frame_points = self.p0[st == 1]
+        self.current_frame_points = self.p1[st == 1]
 
         if self.fivepoint:
             if self.id < 2:
                 E, _ = cv2.findEssentialMat(
-                    self.good_new,
-                    self.good_old,
+                    self.current_frame_points,
+                    self.previous_frame_points,
                     self.focal,
                     self.pp,
                     cv2.RANSAC,
@@ -119,8 +119,8 @@ class MonoVideoOdometry(object):
 
                 _, self.R, self.t, _ = cv2.recoverPose(
                     E,
-                    self.good_old,
-                    self.good_new,
+                    self.previous_frame_points,
+                    self.current_frame_points,
                     self.R.copy(),
                     self.t,
                     self.focal,
@@ -129,8 +129,8 @@ class MonoVideoOdometry(object):
                 )
             else:
                 E, _ = cv2.findEssentialMat(
-                    self.good_new,
-                    self.good_old,
+                    self.current_frame_points,
+                    self.previous_frame_points,
                     self.focal,
                     self.pp,
                     cv2.RANSAC,
@@ -141,8 +141,8 @@ class MonoVideoOdometry(object):
 
                 _, R, t, _ = cv2.recoverPose(
                     E,
-                    self.good_old,
-                    self.good_new,
+                    self.previous_frame_points,
+                    self.current_frame_points,
                     self.R.copy(),
                     self.t.copy(),
                     self.focal,
@@ -156,28 +156,32 @@ class MonoVideoOdometry(object):
                     self.R = R.dot(self.R)
 
             # Save the total number of good features
-            self.n_features = self.good_new.shape[0]
+            self.n_features = self.current_frame_points.shape[0]
         else:
             # Fundamental matrix inbuilt estimation using eight point inbuilt method
-            # """
-            fundamental_matrix_inbuilt, inliers = eight_point_estimation_builtin(self.good_old, self.good_new)
-            old_frame_inliers = self.good_old[inliers.ravel() == 1]
-            current_frame_inliers = self.good_new[inliers.ravel() == 1]
+            """
+            fundamental_matrix_inbuilt, inliers = eight_point_estimation_builtin(
+                self.previous_frame_points, self.current_frame_points
+            )
+            old_frame_inliers = self.previous_frame_points[inliers.ravel() == 1]
+            current_frame_inliers = self.current_frame_points[inliers.ravel() == 1]
             fundamental_matrix = fundamental_matrix_inbuilt.T
-            # """
+            """
 
             # Fundamental matrix inbuilt estimation using eight point custom method
             M = max(self.image_shape)
-            self.good_old = scale_coordinates(self.good_old, M)
-            self.good_new = scale_coordinates(self.good_new, M)
+            self.previous_frame_points = scale_coordinates(self.previous_frame_points, M)
+            self.current_frame_points = scale_coordinates(self.current_frame_points, M)
 
-            self.good_old = cartesian_to_homogeneous(self.good_old)
-            self.good_new = cartesian_to_homogeneous(self.good_new)
+            self.previous_frame_points = cartesian_to_homogeneous(self.previous_frame_points)
+            self.current_frame_points = cartesian_to_homogeneous(self.current_frame_points)
 
-            # fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(self.good_old, self.good_new)
             fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(
-                self.good_old[inliers.ravel() == 1], self.good_new[inliers.ravel() == 1]
+                self.previous_frame_points, self.current_frame_points
             )
+            # fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(
+            #     self.previous_frame_points[inliers.ravel() == 1], self.current_frame_points[inliers.ravel() == 1]
+            # )
             fundamental_matrix = unscale_fundamental_matrix(fundamental_matrix, M)
 
             old_frame_inliers = homogeneous_to_cartesian(old_frame_inliers)
@@ -218,7 +222,7 @@ class MonoVideoOdometry(object):
                     self.R = R.dot(self.R)
 
         # Save the total number of good features
-        self.n_features = self.good_new.shape[0]
+        self.n_features = self.current_frame_points.shape[0]
 
     def get_mono_coordinates(self):
         """
