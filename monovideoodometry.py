@@ -7,11 +7,11 @@ class MonoVideoOdometry(object):
     def __init__(
         self,
         img_file_path,
-        calib_path,
         pose_file_path,
         focal_length=718.8560,
         pp=(607.1928, 185.2157),
         lk_params=dict(winSize=(21, 21), criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)),
+        image_shape=(370, 1226),
         detector=cv2.FastFeatureDetector_create(threshold=25, nonmaxSuppression=True),
     ):
         """
@@ -30,10 +30,10 @@ class MonoVideoOdometry(object):
         """
 
         self.file_path = img_file_path
-        self.calib_path = calib_path
         self.detector = detector
         self.lk_params = lk_params
         self.focal = focal_length
+        self.image_shape = image_shape
         self.pp = pp
         self.R = np.zeros(shape=(3, 3))
         self.t = np.zeros(shape=(3, 3))
@@ -85,7 +85,7 @@ class MonoVideoOdometry(object):
 
         return np.array([x.pt for x in p0], dtype=np.float32).reshape(-1, 1, 2)
 
-    def visual_odometery(self):
+    def visual_odometry(self):
         """
         Used to perform visual odometery. If features fall out of frame
         such that there are less than 2000 features remaining, a new feature
@@ -105,47 +105,73 @@ class MonoVideoOdometry(object):
         self.good_old = self.p0[st == 1]
         self.good_new = self.p1[st == 1]
 
+        from eight_point import eight_point_estimation_builtin
+        from RANSAC import RANSAC
+        from utils import cartesian_to_homogeneous, homogeneous_to_cartesian, scale_coordinates, unscale_coordinates, unscale_fundamental_matrix
+
+        F, x = eight_point_estimation_builtin(self.good_old, self.good_new)
+
+        M = max(self.image_shape) + 400
+        self.good_old = scale_coordinates(self.good_old, M)
+        self.good_new = scale_coordinates(self.good_new, M)
+
+        self.good_old = cartesian_to_homogeneous(self.good_old)
+        self.good_new = cartesian_to_homogeneous(self.good_new)
+
+        K = np.array([[7.215377000000e+02, 0.000000000000e+00, 6.095593000000e+02],
+                      [0.000000000000e+00, 7.215377000000e+02, 1.728540000000e+02],
+                      [0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00]])
+
+        F, r1, r2 = RANSAC(self.good_old[x.ravel() == 1], self.good_new[x.ravel() == 1])
+        F = unscale_fundamental_matrix(F, M)
+
+        q, w = self.good_old[x.ravel() == 1][:, :2], self.good_new[x.ravel() == 1][:, :2]
+        q, w  = r1, r2
+
+
         # If the frame is one of first two, we need to initalize
         # our t and R vectors so behavior is different
-        # if self.id < 2:
-        #     E, _ = cv2.findEssentialMat(
-        #         self.good_new, self.good_old, self.focal, self.pp, cv2.RANSAC, 0.999, 1.0, None
-        #     )
-        #     _, self.R, self.t, _ = cv2.recoverPose(
-        #         E, self.good_old, self.good_new, self.R, self.t, self.focal, self.pp, None
-        #     )
-        # else:
-        #     E, _ = cv2.findEssentialMat(
-        #         self.good_new, self.good_old, self.focal, self.pp, cv2.RANSAC, 0.999, 1.0, None
-        #     )
-        #     _, R, t, _ = cv2.recoverPose(
-        #         E, self.good_old, self.good_new, self.R.copy(), self.t.copy(), self.focal, self.pp, None
-        #     )
-        #
-        #     absolute_scale = self.get_absolute_scale()
-        #     if absolute_scale > 0.1 and abs(t[2][0]) > abs(t[0][0]) and abs(t[2][0]) > abs(t[1][0]):
-        #         self.t = self.t + absolute_scale * self.R.dot(t)
-        #         self.R = R.dot(self.R)
-
         if self.id < 2:
-            E, _ = cv2.findEssentialMat(
-                self.good_new, self.good_old, self.focal, self.pp, cv2.RANSAC, 0.999, 1.0, None
-            )
+            # E1, _ = cv2.findEssentialMat(
+            #     self.good_new, self.good_old, self.focal, self.pp, cv2.RANSAC, 0.999, 1.0, None
+            # )
+
+            E = K.T @ F @ K
+            # _, self.R, self.t, _ = cv2.recoverPose(
+            #     E, self.good_old[:, :2] * 1726, self.good_new[:, :2] * 1726, self.R.copy(), self.t, self.focal, self.pp, None
+            # )
+
+            E = K.T @ F @ K
+            q = q[:, :2] * 1726
+            w = w[:, :2] * 1726
             _, self.R, self.t, _ = cv2.recoverPose(
-                E, self.good_old, self.good_new, self.R, self.t, self.focal, self.pp, None
+                E, q, w, self.R.copy(), self.t, self.focal, self.pp, None
             )
-        else:
-            E, _ = cv2.findEssentialMat(
-                self.good_new, self.good_old, self.focal, self.pp, cv2.RANSAC, 0.999, 1.0, None
-            )
+        elif q.any() and w.any():
+            # E1, _ = cv2.findEssentialMat(
+            #     self.good_new, self.good_old, self.focal, self.pp, cv2.RANSAC, 0.999, 1.0, None
+            # )
+            # _, R, t, _ = cv2.recoverPose(
+            #     E, self.good_old, self.good_new, self.R.copy(), self.t.copy(), self.focal, self.pp, None
+            # )
+
+            E = K.T @ F @ K
+            q = q[:, :2] * 1726
+            w = w[:, :2] * 1726
+
             _, R, t, _ = cv2.recoverPose(
-                E, self.good_old, self.good_new, self.R.copy(), self.t.copy(), self.focal, self.pp, None
+                E, q, w, self.R.copy(), self.t.copy(), self.focal, self.pp, None
             )
 
             absolute_scale = self.get_absolute_scale()
             if absolute_scale > 0.1 and abs(t[2][0]) > abs(t[0][0]) and abs(t[2][0]) > abs(t[1][0]):
                 self.t = self.t + absolute_scale * self.R.dot(t)
                 self.R = R.dot(self.R)
+        else:
+            absolute_scale = self.get_absolute_scale()
+            # if absolute_scale > 0.1 and abs(t[2][0]) > abs(t[0][0]) and abs(t[2][0]) > abs(t[1][0]):
+            #     self.t = self.t + absolute_scale * self.R.dot(t)
+            #     self.R = R.dot(self.R)
 
         # Save the total number of good features
         self.n_features = self.good_new.shape[0]
@@ -198,10 +224,10 @@ class MonoVideoOdometry(object):
         if self.id < 2:
             self.old_frame = cv2.imread(self.file_path + str().zfill(6) + ".png", 0)
             self.current_frame = cv2.imread(self.file_path + str(1).zfill(6) + ".png", 0)
-            self.visual_odometery()
+            self.visual_odometry()
             self.id = 2
         else:
             self.old_frame = self.current_frame
             self.current_frame = cv2.imread(self.file_path + str(self.id).zfill(6) + ".png", 0)
-            self.visual_odometery()
+            self.visual_odometry()
             self.id += 1
