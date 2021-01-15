@@ -19,9 +19,9 @@ class MonoVideoOdometry(object):
         pp=PP,
         K=K,
         lk_params=LUCAS_KANADE_PARAMS,
+        fivepoint=False,
         image_shape=IMAGE_SHAPE,
         detector=DETECTOR,
-        fivepoint=False,
     ):
         """
         Initializes the class
@@ -30,9 +30,9 @@ class MonoVideoOdometry(object):
         :param focal_length: Focal length of camera used in image sequence
         :param pp: Principal point of camera in image sequence
         :param lk_params: Parameters for Lucas Kanade optical flow
+        :param fivepoint: Five point or eight point algorithm
         :param image_shape: Shape of image frames
         :param detector: Most types of OpenCV feature detectors
-        :param fivepoint: Five point or eight point algorithm
         """
 
         self.file_path = image_file_path
@@ -52,9 +52,7 @@ class MonoVideoOdometry(object):
 
         try:
             if not all([".png" in x for x in os.listdir(image_file_path)]):
-                raise ValueError(
-                    "image_file_path is not correct and does not have exclusively png files"
-                )
+                raise ValueError("image_file_path is not correct and does not have exclusively png files")
         except Exception as e:
             print(e)
             raise ValueError("The designated image_file_path does not exist")
@@ -64,9 +62,7 @@ class MonoVideoOdometry(object):
                 self.pose = f.readlines()
         except Exception as e:
             print(e)
-            raise ValueError(
-                "The pose_file_path is not valid or did not lead to a txt file"
-            )
+            raise ValueError("The pose_file_path is not valid or did not lead to a txt file")
 
         self.process_frame()
 
@@ -108,40 +104,8 @@ class MonoVideoOdometry(object):
         self.good_old = self.p0[st == 1]
         self.good_new = self.p1[st == 1]
 
-        if not self.fivepoint:
-            # Fundamental matrix inbuilt estimation using eight point inbuilt method
-            """
-            fundamental_matrix_inbuilt, inliers = eight_point_estimation_builtin(self.good_old, self.good_new)
-            old_frame_inliers = self.good_old[inliers.ravel() == 1]
-            current_frame_inliers = self.good_new[inliers.ravel() == 1]
-            fundamental_matrix = fundamental_matrix_inbuilt.T
-            """
-
-            # Fundamental matrix inbuilt estimation using eight point custom method
-            M = max(self.image_shape)
-            self.good_old = scale_coordinates(self.good_old, M)
-            self.good_new = scale_coordinates(self.good_new, M)
-
-            self.good_old = cartesian_to_homogeneous(self.good_old)
-            self.good_new = cartesian_to_homogeneous(self.good_new)
-
-            fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(
-                self.good_old, self.good_new
-            )
-            # fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(self.good_old[inliers.ravel() == 1], self.good_new[inliers.ravel() == 1])
-            fundamental_matrix = unscale_fundamental_matrix(fundamental_matrix, M)
-
-            old_frame_inliers = homogeneous_to_cartesian(old_frame_inliers)
-            current_frame_inliers = homogeneous_to_cartesian(current_frame_inliers)
-
-            old_frame_inliers = unscale_coordinates(old_frame_inliers, M)
-            current_frame_inliers = unscale_coordinates(current_frame_inliers, M)
-
-            E = self.K.T @ fundamental_matrix @ self.K
-
-        # Initialize t and R for first two frames, update it successively
-        if self.id < 2:
-            if self.fivepoint:
+        if self.fivepoint:
+            if self.id < 2:
                 E, _ = cv2.findEssentialMat(
                     self.good_new,
                     self.good_old,
@@ -153,19 +117,18 @@ class MonoVideoOdometry(object):
                     None,
                 )
 
-            _, self.R, self.t, _ = cv2.recoverPose(
-                E,
-                old_frame_inliers,
-                current_frame_inliers,
-                self.R.copy(),
-                self.t,
-                self.focal,
-                self.pp,
-                None,
-            )
-        else:
-            if self.fivepoint:
-                E1, _ = cv2.findEssentialMat(
+                _, self.R, self.t, _ = cv2.recoverPose(
+                    E,
+                    self.good_old,
+                    self.good_new,
+                    self.R.copy(),
+                    self.t,
+                    self.focal,
+                    self.pp,
+                    None,
+                )
+            else:
+                E, _ = cv2.findEssentialMat(
                     self.good_new,
                     self.good_old,
                     self.focal,
@@ -176,25 +139,83 @@ class MonoVideoOdometry(object):
                     None,
                 )
 
-            _, R, t, _ = cv2.recoverPose(
-                E,
-                old_frame_inliers,
-                current_frame_inliers,
-                self.R.copy(),
-                self.t.copy(),
-                self.focal,
-                self.pp,
-                None,
-            )
+                _, R, t, _ = cv2.recoverPose(
+                    E,
+                    self.good_old,
+                    self.good_new,
+                    self.R.copy(),
+                    self.t.copy(),
+                    self.focal,
+                    self.pp,
+                    None,
+                )
 
-            absolute_scale = self.get_absolute_scale()
-            if (
-                absolute_scale > 0.1
-                and abs(t[2][0]) > abs(t[0][0])
-                and abs(t[2][0]) > abs(t[1][0])
-            ):
-                self.t = self.t + absolute_scale * self.R.dot(t)
-                self.R = R.dot(self.R)
+                absolute_scale = self.get_absolute_scale()
+                if absolute_scale > 0.1 and abs(t[2][0]) > abs(t[0][0]) and abs(t[2][0]) > abs(t[1][0]):
+                    self.t = self.t + absolute_scale * self.R.dot(t)
+                    self.R = R.dot(self.R)
+
+            # Save the total number of good features
+            self.n_features = self.good_new.shape[0]
+        else:
+            # Fundamental matrix inbuilt estimation using eight point inbuilt method
+            # """
+            fundamental_matrix_inbuilt, inliers = eight_point_estimation_builtin(self.good_old, self.good_new)
+            old_frame_inliers = self.good_old[inliers.ravel() == 1]
+            current_frame_inliers = self.good_new[inliers.ravel() == 1]
+            fundamental_matrix = fundamental_matrix_inbuilt.T
+            # """
+
+            # Fundamental matrix inbuilt estimation using eight point custom method
+            M = max(self.image_shape)
+            self.good_old = scale_coordinates(self.good_old, M)
+            self.good_new = scale_coordinates(self.good_new, M)
+
+            self.good_old = cartesian_to_homogeneous(self.good_old)
+            self.good_new = cartesian_to_homogeneous(self.good_new)
+
+            # fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(self.good_old, self.good_new)
+            fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(
+                self.good_old[inliers.ravel() == 1], self.good_new[inliers.ravel() == 1]
+            )
+            fundamental_matrix = unscale_fundamental_matrix(fundamental_matrix, M)
+
+            old_frame_inliers = homogeneous_to_cartesian(old_frame_inliers)
+            current_frame_inliers = homogeneous_to_cartesian(current_frame_inliers)
+
+            old_frame_inliers = unscale_coordinates(old_frame_inliers, M)
+            current_frame_inliers = unscale_coordinates(current_frame_inliers, M)
+
+            E = self.K.T @ fundamental_matrix @ self.K
+
+            # Initialize t and R for first two frames, update it successively
+            if self.id < 2:
+                _, self.R, self.t, _ = cv2.recoverPose(
+                    E,
+                    old_frame_inliers,
+                    current_frame_inliers,
+                    self.R.copy(),
+                    self.t,
+                    self.focal,
+                    self.pp,
+                    None,
+                )
+            else:
+                _, R, t, _ = cv2.recoverPose(
+                    E,
+                    old_frame_inliers,
+                    current_frame_inliers,
+                    self.R.copy(),
+                    self.t.copy(),
+                    self.focal,
+                    self.pp,
+                    None,
+                )
+
+                absolute_scale = self.get_absolute_scale()
+                if absolute_scale > 0.1 and abs(t[2][0]) > abs(t[0][0]) and abs(t[2][0]) > abs(t[1][0]):
+                    self.t = self.t + absolute_scale * self.R.dot(t)
+                    self.R = R.dot(self.R)
 
         # Save the total number of good features
         self.n_features = self.good_new.shape[0]
@@ -246,15 +267,11 @@ class MonoVideoOdometry(object):
 
         if self.id < 2:
             self.old_frame = cv2.imread(self.file_path + str().zfill(6) + ".png", 0)
-            self.current_frame = cv2.imread(
-                self.file_path + str(1).zfill(6) + ".png", 0
-            )
+            self.current_frame = cv2.imread(self.file_path + str(1).zfill(6) + ".png", 0)
             self.visual_odometry()
             self.id = 2
         else:
             self.old_frame = self.current_frame
-            self.current_frame = cv2.imread(
-                self.file_path + str(self.id).zfill(6) + ".png", 0
-            )
+            self.current_frame = cv2.imread(self.file_path + str(self.id).zfill(6) + ".png", 0)
             self.visual_odometry()
             self.id += 1

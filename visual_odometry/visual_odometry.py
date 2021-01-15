@@ -3,16 +3,19 @@ from .parameters import *
 
 
 def visual_odometry(
-    image_path="./input/sequences/10/image_0/", pose_path="./input/poses/10.txt"
+    image_path="./input/sequences/10/image_0/",
+    pose_path="./input/poses/10.txt",
+    fivepoint=False,
 ):
     """
     Plots the estimated odometry path using either five point estimation or eight point estimation
     :param image_path: Path to the directory of camera images
     :param pose_path: Path to the directory of pose file
+    :param fivepoint: Whether to use five point or eight point method
     :return: None
     """
 
-    vo = MonoVideoOdometry(image_path, pose_path, FOCAL, PP, K, LUCAS_KANADE_PARAMS)
+    vo = MonoVideoOdometry(image_path, pose_path, FOCAL, PP, K, LUCAS_KANADE_PARAMS, fivepoint)
     trajectory = np.zeros(shape=(800, 1200, 3))
 
     frame_count = 0
@@ -32,21 +35,13 @@ def visual_odometry(
 
         print("MSE Error: ", np.linalg.norm(estimated_coordinates - true_coordinates))
         print("x: {}, y: {}, z: {}".format(*[str(pt) for pt in estimated_coordinates]))
-        print(
-            "True_x: {}, True_y: {}, True_z: {}".format(
-                *[str(pt) for pt in true_coordinates]
-            )
-        )
+        print("True_x: {}, True_y: {}, True_z: {}".format(*[str(pt) for pt in true_coordinates]))
 
         draw_x, draw_y, draw_z = [int(round(x)) for x in estimated_coordinates]
         true_x, true_y, true_z = [int(round(x)) for x in true_coordinates]
 
-        trajectory = cv2.circle(
-            trajectory, (true_x + 400, true_z + 100), 1, list((0, 0, 255)), 4
-        )
-        trajectory = cv2.circle(
-            trajectory, (draw_x + 400, draw_z + 100), 1, list((0, 255, 0)), 4
-        )
+        trajectory = cv2.circle(trajectory, (true_x + 400, true_z + 100), 1, list((0, 0, 255)), 4)
+        trajectory = cv2.circle(trajectory, (draw_x + 400, draw_z + 100), 1, list((0, 255, 0)), 4)
 
         cv2.putText(
             trajectory,
@@ -57,9 +52,7 @@ def visual_odometry(
             (255, 255, 255),
             1,
         )
-        cv2.putText(
-            trajectory, "Red", (270, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1
-        )
+        cv2.putText(trajectory, "Red", (270, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
         cv2.putText(
             trajectory,
             "Estimated Odometry Position:",
@@ -82,9 +75,7 @@ def visual_odometry(
         cv2.imshow("trajectory", trajectory)
 
         if frame_count % 5 == 0:
-            cv2.imwrite(
-                f"./results/trajectory/trajectory_{frame_count}.png", trajectory
-            )
+            cv2.imwrite(f"./results/trajectory/trajectory_{frame_count}.png", trajectory)
 
     cv2.imwrite(f"./results/trajectory.png", trajectory)
     cv2.destroyAllWindows()
