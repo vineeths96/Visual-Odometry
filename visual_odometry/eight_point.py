@@ -24,8 +24,14 @@ def eight_point_estimation_builtin(previous_frame_points_points, current_frame_p
     :return: Fundamental matrix, inlier points
     """
 
-    _, inliers = cv2.findFundamentalMat(previous_frame_points_points, current_frame_points, cv2.FM_RANSAC)
-    F, _ = cv2.findFundamentalMat(previous_frame_points_points[inliers.ravel() == 1], current_frame_points[inliers.ravel() == 1], cv2.FM_8POINT)
+    _, inliers = cv2.findFundamentalMat(
+        previous_frame_points_points, current_frame_points, cv2.FM_RANSAC
+    )
+    F, _ = cv2.findFundamentalMat(
+        previous_frame_points_points[inliers.ravel() == 1],
+        current_frame_points[inliers.ravel() == 1],
+        cv2.FM_8POINT,
+    )
 
     return F, inliers
 
@@ -41,7 +47,9 @@ def eight_point_estimation(previous_frame_points_points, current_frame_points):
     A = np.zeros((previous_frame_points_points.shape[0], 9))
 
     for i in range(previous_frame_points_points.shape[0]):
-        A[i, :] = np.kron(previous_frame_points_points[i, :], current_frame_points[i, :])
+        A[i, :] = np.kron(
+            previous_frame_points_points[i, :], current_frame_points[i, :]
+        )
 
     # Pick the smallest eigenvector
     u, s, vh = np.linalg.svd(A)

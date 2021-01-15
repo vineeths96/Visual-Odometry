@@ -7,7 +7,9 @@ def cartesian_to_homogeneous(cartesian_point):
     :param cartesian_point: Cartesian coordinates
     :return: Homogeneous coordinates
     """
-    homogeneous_point = np.ones([cartesian_point.shape[0], cartesian_point.shape[1] + 1])
+    homogeneous_point = np.ones(
+        [cartesian_point.shape[0], cartesian_point.shape[1] + 1]
+    )
     homogeneous_point[:, :-1] = cartesian_point
 
     return homogeneous_point

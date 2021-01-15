@@ -1,94 +1,88 @@
 import os
-import cv2
-import numpy as np
 from .eight_point import eight_point_estimation_builtin, unscale_fundamental_matrix
 from .RANSAC import RANSAC
-from .utils import cartesian_to_homogeneous, homogeneous_to_cartesian, scale_coordinates, unscale_coordinates
+from .utils import (
+    cartesian_to_homogeneous,
+    homogeneous_to_cartesian,
+    scale_coordinates,
+    unscale_coordinates,
+)
+from .parameters import *
 
 
 class MonoVideoOdometry(object):
     def __init__(
         self,
-        img_file_path,
+        image_file_path,
         pose_file_path,
-        focal_length=718.8560,
-        pp=(607.1928, 185.2157),
-        lk_params=dict(winSize=(21, 21), criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)),
-        image_shape=(370, 1226),
-        detector=cv2.FastFeatureDetector_create(threshold=25, nonmaxSuppression=True),
-        fivepoint=False
+        focal_length=FOCAL,
+        pp=PP,
+        K=K,
+        lk_params=LUCAS_KANADE_PARAMS,
+        image_shape=IMAGE_SHAPE,
+        detector=DETECTOR,
+        fivepoint=False,
     ):
         """
-        Arguments:
-            img_file_path {str} -- File path that leads to image sequences
-            pose_file_path {str} -- File path that leads to true poses from image sequence
-
-        Keyword Arguments:
-            focal_length {float} -- Focal length of camera used in image sequence (default: {718.8560})
-            pp {tuple} -- Principal point of camera in image sequence (default: {(607.1928, 185.2157)})
-            lk_params {dict} -- Parameters for Lucas Kanade optical flow (default: {dict(winSize  = (21,21), criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))})
-            detector {cv2.FeatureDetector} -- Most types of OpenCV feature detectors (default: {cv2.FastFeatureDetector_create(threshold=25, nonmaxSuppression=True)})
-
-        Raises:
-            ValueError -- Raised when file either file paths are not correct, or img_file_path is not configured correctly
+        Initializes the class
+        :param img_file_path: File path that leads to image sequences
+        :param pose_file_path: File path that leads to true poses from image sequence
+        :param focal_length: Focal length of camera used in image sequence
+        :param pp: Principal point of camera in image sequence
+        :param lk_params: Parameters for Lucas Kanade optical flow
+        :param image_shape: Shape of image frames
+        :param detector: Most types of OpenCV feature detectors
+        :param fivepoint: Five point or eight point algorithm
         """
 
-        self.file_path = img_file_path
+        self.file_path = image_file_path
         self.detector = detector
-        self.lk_params = lk_params
         self.focal = focal_length
-        self.image_shape = image_shape
         self.pp = pp
+        self.K = K
+        self.lk_params = lk_params
+        self.image_shape = image_shape
         self.fivepoint = fivepoint
+
         self.R = np.zeros(shape=(3, 3))
         self.t = np.zeros(shape=(3, 3))
+
         self.id = 0
         self.n_features = 0
 
-        self.K = np.array([[7.215377000000e+02, 0.000000000000e+00, 6.095593000000e+02],
-                      [0.000000000000e+00, 7.215377000000e+02, 1.728540000000e+02],
-                      [0.000000000000e+00, 0.000000000000e+00, 1.000000000000e+00]])
-
-
         try:
-            if not all([".png" in x for x in os.listdir(img_file_path)]):
-                raise ValueError("img_file_path is not correct and does not exclusively png files")
+            if not all([".png" in x for x in os.listdir(image_file_path)]):
+                raise ValueError(
+                    "image_file_path is not correct and does not have exclusively png files"
+                )
         except Exception as e:
             print(e)
-            raise ValueError("The designated img_file_path does not exist, please check the path and try again")
+            raise ValueError("The designated image_file_path does not exist")
 
         try:
             with open(pose_file_path) as f:
                 self.pose = f.readlines()
         except Exception as e:
             print(e)
-            raise ValueError("The pose_file_path is not valid or did not lead to a txt file")
+            raise ValueError(
+                "The pose_file_path is not valid or did not lead to a txt file"
+            )
 
         self.process_frame()
 
     def hasNextFrame(self):
         """
-        Used to determine whether there are remaining frames
-           in the folder to process
-
-        Returns:
-            bool -- Boolean value denoting whether there are still
-            frames in the folder to process
+        Determine whether there are remaining frames in the folder to process
+        :return: Whether there are still frames in the folder to process
         """
 
         return self.id < len(os.listdir(self.file_path))
 
     def detect(self, img):
         """
-        Used to detect features and parse into useable format
-
-
-        Arguments:
-            img {np.ndarray} -- Image for which to detect keypoints on
-
-        Returns:
-            np.array -- A sequence of points in (x, y) coordinate format
-            denoting location of detected keypoint
+        Detect features and parse into useable format
+        :param img: Image for which to detect keypoints on
+        :return: A sequence of points in (x, y) coordinate format denoting location of detected keypoint
         """
 
         p0 = self.detector.detect(img)
@@ -97,16 +91,15 @@ class MonoVideoOdometry(object):
 
     def visual_odometry(self):
         """
-        Used to perform visual odometery. If features fall out of frame
-        such that there are less than 2000 features remaining, a new feature
-        detection is triggered.
+        Estimates the location using visual odometery. Depending on self.fivepoint flag either a five point
+        method or eight point method is used. If features fall out of frame such that there are less than 2000
+        features remaining, a new feature detection is triggered.
         """
 
         if self.n_features < 2000:
             self.p0 = self.detect(self.old_frame)
 
-        # Calculate optical flow between frames, st holds status
-        # of points from frame to frame
+        # Calculate optical flow between frames, and track matched points from frame to frame
         self.p1, st, err = cv2.calcOpticalFlowPyrLK(
             self.old_frame, self.current_frame, self.p0, None, **self.lk_params
         )
@@ -115,51 +108,91 @@ class MonoVideoOdometry(object):
         self.good_old = self.p0[st == 1]
         self.good_new = self.p1[st == 1]
 
-        Q, x = eight_point_estimation_builtin(self.good_old, self.good_new)
-        # old_frame_inliers, current_frame_inliers = self.good_old[x.ravel() == 1][:, :2], self.good_new[x.ravel() == 1][:, :2]
-        # F = Q.T
+        if not self.fivepoint:
+            # Fundamental matrix inbuilt estimation using eight point inbuilt method
+            """
+            fundamental_matrix_inbuilt, inliers = eight_point_estimation_builtin(self.good_old, self.good_new)
+            old_frame_inliers = self.good_old[inliers.ravel() == 1]
+            current_frame_inliers = self.good_new[inliers.ravel() == 1]
+            fundamental_matrix = fundamental_matrix_inbuilt.T
+            """
 
-        M = max(self.image_shape)
-        self.good_old = scale_coordinates(self.good_old, M)
-        self.good_new = scale_coordinates(self.good_new, M)
+            # Fundamental matrix inbuilt estimation using eight point custom method
+            M = max(self.image_shape)
+            self.good_old = scale_coordinates(self.good_old, M)
+            self.good_new = scale_coordinates(self.good_new, M)
 
-        self.good_old = cartesian_to_homogeneous(self.good_old)
-        self.good_new = cartesian_to_homogeneous(self.good_new)
+            self.good_old = cartesian_to_homogeneous(self.good_old)
+            self.good_new = cartesian_to_homogeneous(self.good_new)
 
-        # F, old_frame_inliers, current_frame_inliers = RANSAC(self.good_old, self.good_new)
-        F, old_frame_inliers, current_frame_inliers = RANSAC(self.good_old[x.ravel() == 1], self.good_new[x.ravel() == 1])
-        F = unscale_fundamental_matrix(F, M)
+            fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(
+                self.good_old, self.good_new
+            )
+            # fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(self.good_old[inliers.ravel() == 1], self.good_new[inliers.ravel() == 1])
+            fundamental_matrix = unscale_fundamental_matrix(fundamental_matrix, M)
 
-        old_frame_inliers = homogeneous_to_cartesian(old_frame_inliers)
-        current_frame_inliers = homogeneous_to_cartesian(current_frame_inliers)
+            old_frame_inliers = homogeneous_to_cartesian(old_frame_inliers)
+            current_frame_inliers = homogeneous_to_cartesian(current_frame_inliers)
 
-        old_frame_inliers = unscale_coordinates(old_frame_inliers, M)
-        current_frame_inliers = unscale_coordinates(current_frame_inliers, M)
+            old_frame_inliers = unscale_coordinates(old_frame_inliers, M)
+            current_frame_inliers = unscale_coordinates(current_frame_inliers, M)
 
-        E = self.K.T @ F @ self.K
+            E = self.K.T @ fundamental_matrix @ self.K
 
-        # If the frame is one of first two, we need to initalize our t and R vectors so behavior is different
+        # Initialize t and R for first two frames, update it successively
         if self.id < 2:
             if self.fivepoint:
                 E, _ = cv2.findEssentialMat(
-                    self.good_new, self.good_old, self.focal, self.pp, cv2.RANSAC, 0.999, 1.0, None
+                    self.good_new,
+                    self.good_old,
+                    self.focal,
+                    self.pp,
+                    cv2.RANSAC,
+                    0.999,
+                    1.0,
+                    None,
                 )
 
             _, self.R, self.t, _ = cv2.recoverPose(
-                E, old_frame_inliers, current_frame_inliers, self.R.copy(), self.t, self.focal, self.pp, None
+                E,
+                old_frame_inliers,
+                current_frame_inliers,
+                self.R.copy(),
+                self.t,
+                self.focal,
+                self.pp,
+                None,
             )
         else:
             if self.fivepoint:
                 E1, _ = cv2.findEssentialMat(
-                    self.good_new, self.good_old, self.focal, self.pp, cv2.RANSAC, 0.999, 1.0, None
+                    self.good_new,
+                    self.good_old,
+                    self.focal,
+                    self.pp,
+                    cv2.RANSAC,
+                    0.999,
+                    1.0,
+                    None,
                 )
 
             _, R, t, _ = cv2.recoverPose(
-                E, old_frame_inliers, current_frame_inliers, self.R.copy(), self.t.copy(), self.focal, self.pp, None
+                E,
+                old_frame_inliers,
+                current_frame_inliers,
+                self.R.copy(),
+                self.t.copy(),
+                self.focal,
+                self.pp,
+                None,
             )
 
             absolute_scale = self.get_absolute_scale()
-            if absolute_scale > 0.1 and abs(t[2][0]) > abs(t[0][0]) and abs(t[2][0]) > abs(t[1][0]):
+            if (
+                absolute_scale > 0.1
+                and abs(t[2][0]) > abs(t[0][0])
+                and abs(t[2][0]) > abs(t[1][0])
+            ):
                 self.t = self.t + absolute_scale * self.R.dot(t)
                 self.R = R.dot(self.R)
 
@@ -167,8 +200,11 @@ class MonoVideoOdometry(object):
         self.n_features = self.good_new.shape[0]
 
     def get_mono_coordinates(self):
-        # We multiply by the diagonal matrix to fix our vector
-        # onto same coordinate axis as true values
+        """
+        Multiply by the diagonal matrix to fix our vector onto same coordinate axis as true values
+        :return: Array in format [x, y, z]
+        """
+
         diag = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, -1]])
         adj_coord = np.matmul(diag, self.t)
 
@@ -177,20 +213,17 @@ class MonoVideoOdometry(object):
     def get_true_coordinates(self):
         """
         Returns true coordinates of vehicle
-
-        Returns:
-            np.array -- Array in format [x, y, z]
+        :return: Array in format [x, y, z]
         """
+
         return self.true_coord.flatten()
 
     def get_absolute_scale(self):
         """
-        Used to provide scale estimation for mutliplying
-           translation vectors
-
-        Returns:
-            float -- Scalar value allowing for scale estimation
+        Estimation of scale for multiplying translation vectors
+        :return: Scalar multiplier
         """
+
         pose = self.pose[self.id - 1].strip().split()
         x_prev = float(pose[3])
         y_prev = float(pose[7])
@@ -213,11 +246,15 @@ class MonoVideoOdometry(object):
 
         if self.id < 2:
             self.old_frame = cv2.imread(self.file_path + str().zfill(6) + ".png", 0)
-            self.current_frame = cv2.imread(self.file_path + str(1).zfill(6) + ".png", 0)
+            self.current_frame = cv2.imread(
+                self.file_path + str(1).zfill(6) + ".png", 0
+            )
             self.visual_odometry()
             self.id = 2
         else:
             self.old_frame = self.current_frame
-            self.current_frame = cv2.imread(self.file_path + str(self.id).zfill(6) + ".png", 0)
+            self.current_frame = cv2.imread(
+                self.file_path + str(self.id).zfill(6) + ".png", 0
+            )
             self.visual_odometry()
             self.id += 1
