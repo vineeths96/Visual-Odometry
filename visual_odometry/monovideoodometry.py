@@ -163,7 +163,7 @@ class MonoVideoOdometry(object):
             fundamental_matrix_inbuilt, inliers = eight_point_estimation_builtin(
                 self.previous_frame_points, self.current_frame_points
             )
-            old_frame_inliers = self.previous_frame_points[inliers.ravel() == 1]
+            previous_frame_inliers = self.previous_frame_points[inliers.ravel() == 1]
             current_frame_inliers = self.current_frame_points[inliers.ravel() == 1]
             fundamental_matrix = fundamental_matrix_inbuilt.T
             """
@@ -176,18 +176,18 @@ class MonoVideoOdometry(object):
             self.previous_frame_points = cartesian_to_homogeneous(self.previous_frame_points)
             self.current_frame_points = cartesian_to_homogeneous(self.current_frame_points)
 
-            fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(
+            fundamental_matrix, previous_frame_inliers, current_frame_inliers = RANSAC(
                 self.previous_frame_points, self.current_frame_points
             )
-            # fundamental_matrix, old_frame_inliers, current_frame_inliers = RANSAC(
+            # fundamental_matrix, previous_frame_inliers, current_frame_inliers = RANSAC(
             #     self.previous_frame_points[inliers.ravel() == 1], self.current_frame_points[inliers.ravel() == 1]
             # )
             fundamental_matrix = unscale_fundamental_matrix(fundamental_matrix, M)
 
-            old_frame_inliers = homogeneous_to_cartesian(old_frame_inliers)
+            previous_frame_inliers = homogeneous_to_cartesian(previous_frame_inliers)
             current_frame_inliers = homogeneous_to_cartesian(current_frame_inliers)
 
-            old_frame_inliers = unscale_coordinates(old_frame_inliers, M)
+            previous_frame_inliers = unscale_coordinates(previous_frame_inliers, M)
             current_frame_inliers = unscale_coordinates(current_frame_inliers, M)
 
             E = self.K.T @ fundamental_matrix @ self.K
@@ -196,7 +196,7 @@ class MonoVideoOdometry(object):
             if self.id < 2:
                 _, self.R, self.t, _ = cv2.recoverPose(
                     E,
-                    old_frame_inliers,
+                    previous_frame_inliers,
                     current_frame_inliers,
                     self.R.copy(),
                     self.t,
@@ -207,7 +207,7 @@ class MonoVideoOdometry(object):
             else:
                 _, R, t, _ = cv2.recoverPose(
                     E,
-                    old_frame_inliers,
+                    previous_frame_inliers,
                     current_frame_inliers,
                     self.R.copy(),
                     self.t.copy(),
